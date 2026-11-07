@@ -1,0 +1,194 @@
+/* Bulk selection, delete confirm and pagination (parity with legacy web / desktop app). */
+.select-checkbox {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: #d4af37;
+}
+
+.select-col {
+    width: 40px !important;
+    text-align: center !important;
+    padding: 12px 8px !important;
+}
+
+table th.select-col,
+table td.select-col {
+    width: 40px !important;
+    min-width: 40px;
+    max-width: 40px;
+    text-align: center !important;
+}
+
+.toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.btn-delete-selected {
+    background: #fff;
+    color: #ef4444;
+    border: 2px solid #ef4444;
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font: 500 13px inherit;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s ease;
+}
+
+.btn-delete-selected:hover {
+    background: #ef4444;
+    color: #fff;
+}
+
+.pagination {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 14px;
+    border-top: 1px solid #f0f0f4;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.page-info {
+    font-size: 13px;
+    color: #8d8d9c;
+}
+
+.page-btns {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.page-btn {
+    min-width: 32px;
+    height: 32px;
+    border: 1px solid #dedee7;
+    background: #fff;
+    color: #24243d;
+    font: 13px inherit;
+    cursor: pointer;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.page-btn:hover:not(:disabled):not(.active) {
+    border-color: #d4af37;
+    color: #b8960c;
+}
+
+.page-btn.active {
+    background: linear-gradient(135deg, #d4af37, #b8960c);
+    border-color: #d4af37;
+    color: #1c1602;
+}
+
+.page-btn:disabled {
+    background: #f5f5f5;
+    color: #ccc;
+    cursor: not-allowed;
+}
+
+.page-dots {
+    padding: 0 5px;
+    color: #8d8d9c;
+}
+
+.confirm-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    padding: 16px;
+}
+
+.confirm-box {
+    background: #fff;
+    border-radius: 12px;
+    padding: 30px 40px;
+    text-align: center;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+    border: 2px solid #d4af37;
+    min-width: 320px;
+    max-width: 100%;
+}
+
+.confirm-icon {
+    font-size: 50px;
+    line-height: 1;
+    color: #f59e0b;
+    margin-bottom: 15px;
+}
+
+.confirm-message {
+    font-size: 16px;
+    color: #24243d;
+    margin-bottom: 25px;
+    line-height: 1.5;
+}
+
+.confirm-buttons {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+}
+
+.confirm-btn {
+    padding: 10px 30px;
+    border-radius: 8px;
+    font: 600 14px inherit;
+    cursor: pointer;
+    border: 2px solid;
+    transition: all 0.2s ease;
+}
+
+.confirm-btn-no {
+    background: #fff;
+    color: #8d8d9c;
+    border-color: #dedee7;
+}
+
+.confirm-btn-no:hover:not(:disabled) {
+    background: #f5f5f5;
+}
+
+.confirm-btn-yes {
+    background: #ef4444;
+    color: #fff;
+    border-color: #ef4444;
+}
+
+.confirm-btn-yes:hover:not(:disabled) {
+    background: #dc2626;
+}
+
+.confirm-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+@media (max-width: 560px) {
+    .pagination {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .btn-delete-selected {
+        width: 100%;
+        justify-content: center;
+    }
+}

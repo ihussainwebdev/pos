@@ -4,6 +4,7 @@ import { isValidSession, SESSION_COOKIE } from "@/lib/auth";
 
 export function proxy(request: NextRequest) {
   if (request.nextUrl.pathname.startsWith("/api/auth")) return NextResponse.next();
+  if (request.nextUrl.pathname.startsWith("/api/sync")) return NextResponse.next();
   if (isValidSession(request.cookies.get(SESSION_COOKIE)?.value)) return NextResponse.next();
   return NextResponse.json({ success: false, data: null, error: "Unauthorized" }, { status: 401 });
 }

@@ -24,6 +24,8 @@ const BillSchema = new Schema({
   totalAmount: { type: Number, required: true },
   profit: { type: Number, required: true },
   isWalkIn: { type: Boolean, default: false },
+  legacySource: { type: String, default: null, select: false },
+  legacyId: { type: Number, default: null, select: false },
 }, { timestamps: true, versionKey: false });
 
 export default models.Bill || model("Bill", BillSchema);

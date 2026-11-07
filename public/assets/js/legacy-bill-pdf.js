@@ -451,7 +451,7 @@ function numberToWords(num) {
 }
 
 // ── Generate PDF – Portrait A4, exact image layout ────────
-async function generatePDF(billNo, customer, salesman, billItems, total, phone, address) {
+async function generatePDF(billNo, customer, salesman, billItems, total, phone, address, printWindow) {
     const { jsPDF } = window.jspdf;
 
     // Portrait A4: 210mm x 297mm
@@ -660,22 +660,40 @@ async function generatePDF(billNo, customer, salesman, billItems, total, phone, 
     const safeName  = customer.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_');
     const fileName  = `${safeName}_Bill_${billNo}.pdf`;
 
-    // Get PDF as blob, open in new tab, then trigger print
+    // Get PDF as blob
     const pdfBlob = doc.output('blob');
     const blobUrl = URL.createObjectURL(pdfBlob);
 
-    // Also trigger download
+    // Trigger download
     doc.save(fileName);
 
-    // Open in new tab and auto-print
-    const printWin = window.open(blobUrl, '_blank');
+    // Print: use the window opened during the click gesture when available,
+    // otherwise fall back to a hidden iframe (avoids popup blockers).
+    const printWin = printWindow && !printWindow.closed ? printWindow : null;
     if (printWin) {
         printWin.addEventListener('load', () => {
             setTimeout(() => {
-                printWin.focus();
-                printWin.print();
+                try { printWin.focus(); printWin.print(); } catch (e) {}
             }, 500);
-        });
+        }, { once: true });
+        printWin.location.href = blobUrl;
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+    } else {
+        const frame = document.createElement('iframe');
+        frame.style.position = 'fixed';
+        frame.style.right = '0';
+        frame.style.bottom = '0';
+        frame.style.width = '0';
+        frame.style.height = '0';
+        frame.style.border = '0';
+        frame.src = blobUrl;
+        frame.onload = () => {
+            setTimeout(() => {
+                try { frame.contentWindow.focus(); frame.contentWindow.print(); } catch (e) {}
+                setTimeout(() => { frame.remove(); URL.revokeObjectURL(blobUrl); }, 60000);
+            }, 500);
+        };
+        document.body.appendChild(frame);
     }
 }
 window.generatePDF = generatePDF;

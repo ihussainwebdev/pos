@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 import "./legacy-nav.css";
 import "./auth.css";
+import "./dashboard.css";
+import "./tables.css";
 
 export const metadata: Metadata = {
   title: "Best Publishers POS",
