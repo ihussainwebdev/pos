@@ -1,4 +1,5 @@
 import { connectDB } from "@/lib/db";
+import { recordDeletion } from "@/lib/sync";
 import { fail, internalError, ok, serialize } from "@/lib/api";
 import Customer from "@/models/Customer";
 
@@ -6,4 +7,4 @@ function clean(value: Record<string, unknown>) { return { name: String(value.nam
 export async function GET() { try { await connectDB(); return ok((await Customer.find().sort({ name: 1 }).lean()).map(serialize)); } catch (error) { return internalError(error); } }
 export async function POST(request: Request) { try { await connectDB(); const values = clean(await request.json() as Record<string, unknown>); if (!values.name) return fail("Name is required"); if (!Number.isFinite(values.percentage) || values.percentage < 0 || values.percentage > 100) return fail("Discount must be between 0 and 100"); return ok(serialize((await Customer.create(values)).toObject()), 201); } catch (error) { return internalError(error); } }
 export async function PUT(request: Request) { try { await connectDB(); const id = new URL(request.url).searchParams.get("id"); if (!id) return fail("ID required"); const values = clean(await request.json() as Record<string, unknown>); if (!values.name) return fail("Name is required"); if (!Number.isFinite(values.percentage) || values.percentage < 0 || values.percentage > 100) return fail("Discount must be between 0 and 100"); const customer = await Customer.findByIdAndUpdate(id, values, { new: true, runValidators: true }).lean(); return customer ? ok(serialize(customer)) : fail("Customer not found", 404); } catch (error) { return internalError(error); } }
-export async function DELETE(request: Request) { try { await connectDB(); const id = new URL(request.url).searchParams.get("id"); if (!id) return fail("ID required"); const customer = await Customer.findByIdAndDelete(id).lean(); return customer ? ok({ id }) : fail("Customer not found", 404); } catch (error) { return internalError(error); } }
+export async function DELETE(request: Request) { try { await connectDB(); const id = new URL(request.url).searchParams.get("id"); if (!id) return fail("ID required"); const customer = await Customer.findByIdAndDelete(id).lean(); if (!customer) return fail("Customer not found", 404); await recordDeletion("customer", customer._id); return ok({ id }); } catch (error) { return internalError(error); } }

@@ -5,6 +5,7 @@ const BookSchema = new Schema({
   price: { type: Number, required: true, min: 0, default: 0 },
   cost: { type: Number, required: true, min: 0, default: 0 },
   stock: { type: Number, required: true, min: 0, default: 0 },
+  clientUid: { type: String, select: false, index: { sparse: true } },
 }, { timestamps: true, versionKey: false });
 
 export default models.Book || model("Book", BookSchema);

@@ -26,6 +26,7 @@ const BillSchema = new Schema({
   isWalkIn: { type: Boolean, default: false },
   legacySource: { type: String, default: null, select: false },
   legacyId: { type: Number, default: null, select: false },
+  clientUid: { type: String, select: false, index: { sparse: true } },
 }, { timestamps: true, versionKey: false });
 
 export default models.Bill || model("Bill", BillSchema);
