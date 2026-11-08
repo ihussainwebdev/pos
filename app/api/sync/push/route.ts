@@ -9,12 +9,25 @@ import Salesman from "@/models/Salesman";
 
 type Row = Record<string, unknown>;
 type Ref = { remoteId?: string | null; uid?: string | null } | null | undefined;
-type Op = Row & { seq: number; kind: string; entity: SyncEntity; remoteId?: string | null; uid?: string | null };
+type Op = Row & { seq: number; kind: string; entity: SyncEntity; remoteId?: string | null; uid?: string | null; opId?: string | null };
 
 const MAX_OPS = 50;
 const SOURCE = "bestpublishers-desktop";
+const LEDGER_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 class PermanentError extends Error {}
+
+// Processed-op ledger makes retries idempotent: a committed op is never applied twice.
+const ledger = () => mongoose.connection.getClient().db().collection("syncops");
+let ledgerIndexes: Promise<unknown> | null = null;
+function ensureLedger() {
+  ledgerIndexes ||= Promise.all([
+    ledger().createIndex({ opId: 1 }, { unique: true }),
+    ledger().createIndex({ processedAt: 1 }, { expireAfterSeconds: LEDGER_TTL_SECONDS }),
+  ]);
+  return ledgerIndexes;
+}
+const isDuplicateKey = (error: unknown) => Boolean(error && typeof error === "object" && (error as { code?: number }).code === 11000);
 
 const text = (value: unknown) => String(value ?? "").trim();
 const number = (value: unknown, fallback = 0) => { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : fallback; };
@@ -55,7 +68,7 @@ function masterFields(entity: SyncEntity, data: Row) {
   throw new PermanentError(`Unknown entity ${entity}`);
 }
 
-async function upsertMaster(op: Op) {
+async function upsertMaster(op: Op, session: ClientSession) {
   const data = (op.data ?? {}) as Row;
   const fields = masterFields(op.entity, data);
   if (op.entity === "book" ? !("title" in fields) || !fields.title : !("name" in fields) || !fields.name) throw new PermanentError("Name/title is required");
@@ -64,39 +77,39 @@ async function upsertMaster(op: Op) {
   const stockDelta = Math.trunc(number(op.stockDelta));
   const title = op.entity === "book" ? text(data.title) : "";
 
-  let doc = await findRef(op.entity, op);
-  if (!doc && title) doc = await collection.findOne(titleFilter(title));
+  let doc = await findRef(op.entity, op, session);
+  if (!doc && title) doc = await collection.findOne(titleFilter(title), { session });
 
   if (doc) {
     if (title) {
-      const duplicate = await collection.findOne({ _id: { $ne: doc._id }, ...titleFilter(title) });
+      const duplicate = await collection.findOne({ _id: { $ne: doc._id }, ...titleFilter(title) }, { session });
       if (duplicate) throw new PermanentError("Book with this title already exists!");
     }
     const update: mongo.UpdateFilter<mongo.Document> = { $set: { ...fields, updatedAt: now } };
     if (op.entity === "book" && stockDelta) update.$inc = { stock: stockDelta };
-    await collection.updateOne({ _id: doc._id }, update);
+    await collection.updateOne({ _id: doc._id }, update, { session });
     return { remoteId: doc._id.toString() };
   }
 
   const insert: mongo.Document = { ...fields, clientUid: text(op.uid) || undefined, createdAt: sourceDate(data.created_at) ?? now, updatedAt: now };
   if (op.entity === "book") insert.stock = Math.trunc(number(data.stock));
-  const result = await collection.insertOne(insert);
+  const result = await collection.insertOne(insert, { session });
   return { remoteId: result.insertedId.toString() };
 }
 
-async function changeStock(op: Op) {
-  const doc = await findRef("book", op);
+async function changeStock(op: Op, session: ClientSession) {
+  const doc = await findRef("book", op, session);
   if (!doc) return { remoteId: null, missing: true };
   const delta = Math.trunc(number(op.delta));
-  if (delta) await collectionOf("book").updateOne({ _id: doc._id }, { $inc: { stock: delta }, $set: { updatedAt: new Date() } });
+  if (delta) await collectionOf("book").updateOne({ _id: doc._id }, { $inc: { stock: delta }, $set: { updatedAt: new Date() } }, { session });
   return { remoteId: doc._id.toString() };
 }
 
-async function deleteMaster(op: Op) {
-  const doc = await findRef(op.entity, op);
+async function deleteMaster(op: Op, session: ClientSession) {
+  const doc = await findRef(op.entity, op, session);
   if (!doc) return { remoteId: null, missing: true };
-  await collectionOf(op.entity).deleteOne({ _id: doc._id });
-  await recordDeletion(op.entity, doc._id.toString());
+  await collectionOf(op.entity).deleteOne({ _id: doc._id }, { session });
+  await recordDeletion(op.entity, doc._id.toString(), session);
   return { remoteId: doc._id.toString() };
 }
 
@@ -110,11 +123,11 @@ async function adjustStock(items: Array<{ bookId: unknown; quantity: unknown }>,
   }
 }
 
-async function upsertBill(op: Op) {
+async function upsertBill(op: Op, session: ClientSession) {
   const data = (op.data ?? {}) as Row;
   let outcome: { remoteId: string; billNo: string } | null = null;
 
-  await mongoose.connection.transaction(async (session) => {
+  {
     const isWalkIn = Boolean(data.isWalkIn);
     const salesmanRef = data.salesman as Ref;
     const salesman = await findRef("salesman", salesmanRef, session) ?? danglingRef(salesmanRef, { name: text(data.salesmanName) });
@@ -157,7 +170,7 @@ async function upsertBill(op: Op) {
       await bills.updateOne({ _id: existing._id }, { $set: fields }, { session });
       await adjustStock(items as Array<{ bookId: unknown; quantity: unknown }>, -1, session);
       outcome = { remoteId: existing._id.toString(), billNo: String(existing.billNo) };
-      return;
+      return outcome;
     }
 
     const legacyId = number(data.legacyId, Number.NaN);
@@ -175,31 +188,60 @@ async function upsertBill(op: Op) {
     }, { session });
     await adjustStock(items as Array<{ bookId: unknown; quantity: unknown }>, -1, session);
     outcome = { remoteId: result.insertedId.toString(), billNo };
-  });
+  }
 
   return outcome!;
 }
 
-async function deleteBill(op: Op) {
+async function deleteBill(op: Op, session: ClientSession) {
   let outcome: { remoteId: string | null; missing?: boolean } = { remoteId: null, missing: true };
-  await mongoose.connection.transaction(async (session) => {
+  {
     const doc = await findRef("bill", op, session);
-    if (!doc) { outcome = { remoteId: null, missing: true }; return; }
+    if (!doc) { outcome = { remoteId: null, missing: true }; return outcome; }
     await adjustStock(Array.isArray(doc.items) ? doc.items : [], 1, session);
     await collectionOf("bill").deleteOne({ _id: doc._id }, { session });
     await recordDeletion("bill", doc._id.toString(), session);
     outcome = { remoteId: doc._id.toString() };
-  });
+  }
   return outcome;
 }
 
-async function apply(op: Op) {
-  if (op.kind === "upsert" && op.entity !== "bill") return upsertMaster(op);
-  if (op.kind === "stock" && op.entity === "book") return changeStock(op);
-  if (op.kind === "delete" && op.entity !== "bill") return deleteMaster(op);
-  if (op.kind === "bill" && op.entity === "bill") return upsertBill(op);
-  if (op.kind === "bill_delete" && op.entity === "bill") return deleteBill(op);
+async function apply(op: Op, session: ClientSession) {
+  if (op.kind === "upsert" && op.entity !== "bill") return upsertMaster(op, session);
+  if (op.kind === "stock" && op.entity === "book") return changeStock(op, session);
+  if (op.kind === "delete" && op.entity !== "bill") return deleteMaster(op, session);
+  if (op.kind === "bill" && op.entity === "bill") return upsertBill(op, session);
+  if (op.kind === "bill_delete" && op.entity === "bill") return deleteBill(op, session);
   throw new PermanentError(`Unknown operation ${op.kind}/${op.entity}`);
+}
+
+// Runs the op and its ledger record in one transaction so a retry replays the
+// stored result instead of re-applying stock deltas or re-inserting a bill.
+async function applyIdempotent(op: Op): Promise<Row> {
+  const opId = text(op.opId);
+  if (!opId) {
+    let plain: Row = {};
+    await mongoose.connection.transaction(async (session) => { plain = await apply(op, session); });
+    return plain;
+  }
+  await ensureLedger();
+  try {
+    let stored: Row | null = null;
+    await mongoose.connection.transaction(async (session) => {
+      const existing = await ledger().findOne({ opId }, { session });
+      if (existing) { stored = existing.result as Row; return; }
+      const result = await apply(op, session);
+      await ledger().insertOne({ opId, result, processedAt: new Date() }, { session });
+      stored = result;
+    });
+    return stored!;
+  } catch (error) {
+    if (isDuplicateKey(error)) {
+      const existing = await ledger().findOne({ opId });
+      if (existing) return existing.result as Row;
+    }
+    throw error;
+  }
 }
 
 export async function POST(request: Request) {
@@ -214,7 +256,7 @@ export async function POST(request: Request) {
     const results: Row[] = [];
     for (const op of ops) {
       try {
-        results.push({ seq: op.seq, ok: true, ...(await apply(op)) });
+        results.push({ seq: op.seq, ok: true, ...(await applyIdempotent(op)) });
       } catch (error) {
         if (error instanceof PermanentError) { results.push({ seq: op.seq, ok: false, permanent: true, error: error.message }); continue; }
         console.error("Sync push operation failed", op.kind, op.entity, error);
